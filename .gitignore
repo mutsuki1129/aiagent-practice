@@ -14,6 +14,8 @@ venv/
 # Vector DB and local runtime files
 chroma_db/
 .tmp/
+run.log
+run.err.log
 
 # OS / editor
 .DS_Store
