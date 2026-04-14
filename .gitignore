@@ -1,0 +1,25 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+
+# Environment variables
+.env
+
+# Vector DB and local runtime files
+chroma_db/
+.tmp/
+run.log
+run.err.log
+.adk/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

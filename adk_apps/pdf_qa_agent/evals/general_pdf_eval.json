@@ -1,0 +1,20 @@
+[
+  {
+    "name": "natural_dialog_summary",
+    "question": "Please summarize this PDF.",
+    "pdf_path": "sample_natural_dialog_127.pdf",
+    "expected_keywords": ["Mia", "Leo", "conversation"]
+  },
+  {
+    "name": "natural_dialog_roles",
+    "question": "From the conversation, what are Mia and Leo likely roles or job functions?",
+    "pdf_path": "sample_natural_dialog_127.pdf",
+    "expected_keywords": ["team", "engineer", "product", "QA"]
+  },
+  {
+    "name": "icd_lookup",
+    "question": "6B85 是什麼？",
+    "pdf_path": "ICD 11 Cheater VI精神、行為或神經發育障礙分類Index-20260409.pdf",
+    "expected_keywords": ["6B85", "反芻-逆流障礙"]
+  }
+]

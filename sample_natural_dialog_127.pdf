@@ -1,0 +1,328 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [4 0 R 6 0 R 8 0 R 10 0 R] /Count 4 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>
+endobj
+5 0 obj
+<< /Length 2494 >>
+stream
+BT
+/F1 10 Tf
+50 750 Td
+(Mia: Hey, did you sleep okay last night?) Tj
+0 -16 Td
+(Leo: Not really, the rain was super loud around 3 a.m.) Tj
+0 -16 Td
+(Mia: Same here, I kept waking up and checking the time.) Tj
+0 -16 Td
+(Leo: At least the weather is cooler today, so I will take that win.) Tj
+0 -16 Td
+(Mia: Are you still coming to the team sync at ten?) Tj
+0 -16 Td
+(Leo: Yes, but I need five minutes to refill coffee first.) Tj
+0 -16 Td
+(Mia: Perfect, I will save the roadmap section for you.) Tj
+0 -16 Td
+(Leo: Thanks, I have updates about the PDF search bug.) Tj
+0 -16 Td
+(Mia: Did you reproduce it on both local model and cloud model?) Tj
+0 -16 Td
+(Leo: Yeah, local failed more often when the question quoted exact text.) Tj
+0 -16 Td
+(Mia: That matches what QA reported yesterday afternoon.) Tj
+0 -16 Td
+(Leo: I added an exact-match fallback and it looks much better.) Tj
+0 -16 Td
+(Mia: Nice, did latency increase a lot?) Tj
+0 -16 Td
+(Leo: Only a little, about two hundred milliseconds in my test.) Tj
+0 -16 Td
+(Mia: That is acceptable if the answers are more reliable.) Tj
+0 -16 Td
+(Leo: Agreed, users care more about correctness than tiny speed gains.) Tj
+0 -16 Td
+(Mia: By the way, lunch plan today?) Tj
+0 -16 Td
+(Leo: I am thinking noodles, maybe the place near the station.) Tj
+0 -16 Td
+(Mia: I like that spot, their broth is light but flavorful.) Tj
+0 -16 Td
+(Leo: Cool, we can go after the noon deploy.) Tj
+0 -16 Td
+(Mia: Deal, as long as the deploy does not explode.) Tj
+0 -16 Td
+(Leo: Please do not jinx it, I already have enough alerts.) Tj
+0 -16 Td
+(Mia: Fair point, I will be optimistic and quiet.) Tj
+0 -16 Td
+(Leo: Thank you, that is true teamwork.) Tj
+0 -16 Td
+(Mia: Did you review Kevin's pull request yet?) Tj
+0 -16 Td
+(Leo: I started, but I want to rerun tests before approving.) Tj
+0 -16 Td
+(Mia: He added new caching logic, so caution is smart.) Tj
+0 -16 Td
+(Leo: Exactly, cache bugs are sneaky and expensive.) Tj
+0 -16 Td
+(Mia: I can pair with you after the meeting if needed.) Tj
+0 -16 Td
+(Leo: That would help, especially on edge-case scenarios.) Tj
+0 -16 Td
+(Mia: Great, we can write two regression tests together.) Tj
+0 -16 Td
+(Leo: Awesome, then we can merge before end of day.) Tj
+0 -16 Td
+(Mia: What is your backup plan if production is unstable?) Tj
+0 -16 Td
+(Leo: Feature flag off, rollback image, then hotfix in a branch.) Tj
+0 -16 Td
+(Mia: Solid, that sounds calm and reversible.) Tj
+0 -16 Td
+(Leo: I learned the hard way after last quarter's incident.) Tj
+ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 7 0 R >>
+endobj
+7 0 obj
+<< /Length 2497 >>
+stream
+BT
+/F1 10 Tf
+50 750 Td
+(Mia: We all did, but at least postmortem actions paid off.) Tj
+0 -16 Td
+(Leo: True, our monitoring dashboard is way clearer now.) Tj
+0 -16 Td
+(Mia: I saw the new panel for token usage, looks useful.) Tj
+0 -16 Td
+(Leo: Yep, now we can spot runaway prompts quickly.) Tj
+0 -16 Td
+(Mia: Have you tried the new small model for draft responses?) Tj
+0 -16 Td
+(Leo: Yes, it is surprisingly good for first-pass summaries.) Tj
+0 -16 Td
+(Mia: Maybe we should route low-risk questions to it.) Tj
+0 -16 Td
+(Leo: I like that, we can cut cost without hurting quality.) Tj
+0 -16 Td
+(Mia: Let's document that in the architecture notes.) Tj
+0 -16 Td
+(Leo: I will open a doc after the sync.) Tj
+0 -16 Td
+(Mia: Can you also add examples of good and bad prompts?) Tj
+0 -16 Td
+(Leo: Sure, concrete examples reduce confusion for newcomers.) Tj
+0 -16 Td
+(Mia: Exactly, onboarding gets easier when guidance is practical.) Tj
+0 -16 Td
+(Leo: Speaking of onboarding, the new intern starts Monday.) Tj
+0 -16 Td
+(Mia: Nice, we should prepare a starter task with clear scope.) Tj
+0 -16 Td
+(Leo: How about PDF chunk preview improvements?) Tj
+0 -16 Td
+(Mia: Perfect, visible impact and low deployment risk.) Tj
+0 -16 Td
+(Leo: I will create a checklist so they can self-verify.) Tj
+0 -16 Td
+(Mia: Love it, that builds confidence fast.) Tj
+0 -16 Td
+(Leo: Do you want to run a short demo this afternoon?) Tj
+0 -16 Td
+(Mia: Yes, twenty minutes should be enough.) Tj
+0 -16 Td
+(Leo: I can show before-and-after answers with source pages.) Tj
+0 -16 Td
+(Mia: Please include one failure case and how we fixed it.) Tj
+0 -16 Td
+(Leo: Good call, people trust improvements more with evidence.) Tj
+0 -16 Td
+(Mia: Also mention known limits so expectations stay realistic.) Tj
+0 -16 Td
+(Leo: Absolutely, no magic claims, just measurable progress.) Tj
+0 -16 Td
+(Mia: I appreciate how steady you are under pressure.) Tj
+0 -16 Td
+(Leo: Thanks, I learned from this team to stay methodical.) Tj
+0 -16 Td
+(Mia: That mindset keeps incidents small and recoverable.) Tj
+0 -16 Td
+(Leo: And keeps everyone sane during release week.) Tj
+0 -16 Td
+(Mia: Do you need help drafting the release notes?) Tj
+0 -16 Td
+(Leo: Maybe a quick proofreading pass later would be great.) Tj
+0 -16 Td
+(Mia: Happy to do it, send me the link when ready.) Tj
+0 -16 Td
+(Leo: Will do, I will tag you in the doc.) Tj
+0 -16 Td
+(Mia: Any blockers right now that we should escalate?) Tj
+0 -16 Td
+(Leo: One thing: staging queue is slow during peak hours.) Tj
+ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 9 0 R >>
+endobj
+9 0 obj
+<< /Length 2428 >>
+stream
+BT
+/F1 10 Tf
+50 750 Td
+(Mia: Could be noisy neighbors on the shared runner again.) Tj
+0 -16 Td
+(Leo: Yeah, I am collecting metrics before filing infra ticket.) Tj
+0 -16 Td
+(Mia: Great approach, data first saves back-and-forth.) Tj
+0 -16 Td
+(Leo: Exactly, screenshots and timestamps make it actionable.) Tj
+0 -16 Td
+(Mia: By the way, your keyboard sounds quieter today.) Tj
+0 -16 Td
+(Leo: I switched to silent switches, best decision this month.) Tj
+0 -16 Td
+(Mia: Our call recordings thank you for that.) Tj
+0 -16 Td
+(Leo: My coworkers in the next room thank me too.) Tj
+0 -16 Td
+(Mia: After lunch, can we revisit chunk size settings?) Tj
+0 -16 Td
+(Leo: Sure, current overlap may be too large for short docs.) Tj
+0 -16 Td
+(Mia: Maybe adaptive chunking based on page length could help.) Tj
+0 -16 Td
+(Leo: Interesting idea, I can prototype a simple heuristic.) Tj
+0 -16 Td
+(Mia: If it works, we can A/B test this week.) Tj
+0 -16 Td
+(Leo: Yes, with relevance score and answer faithfulness metrics.) Tj
+0 -16 Td
+(Mia: Let's keep the experiment small and reversible.) Tj
+0 -16 Td
+(Leo: Agreed, one variable at a time.) Tj
+0 -16 Td
+(Mia: I will prepare a tiny evaluation set before noon.) Tj
+0 -16 Td
+(Leo: Perfect, I will wire logging for result comparison.) Tj
+0 -16 Td
+(Mia: Could you also include model name in the logs?) Tj
+0 -16 Td
+(Leo: Already planned, that field is easy to add.) Tj
+0 -16 Td
+(Mia: Amazing, future us will be grateful.) Tj
+0 -16 Td
+(Leo: Future us deserves fewer mysteries.) Tj
+0 -16 Td
+(Mia: Quick check: are we still good for Friday demo?) Tj
+0 -16 Td
+(Leo: Yes, if tonight's smoke tests stay green.) Tj
+0 -16 Td
+(Mia: I can monitor the first run and ping if anything fails.) Tj
+0 -16 Td
+(Leo: Thanks, that reduces a lot of anxiety.) Tj
+0 -16 Td
+(Mia: No problem, we are in this together.) Tj
+0 -16 Td
+(Leo: Exactly, shared ownership makes hard tasks manageable.) Tj
+0 -16 Td
+(Mia: Do you want to rehearse the demo script tomorrow?) Tj
+0 -16 Td
+(Leo: Yes, one dry run in the morning would be ideal.) Tj
+0 -16 Td
+(Mia: I will book a room and send the invite.) Tj
+0 -16 Td
+(Leo: Great, add five minutes for Q and A practice.) Tj
+0 -16 Td
+(Mia: Done, and we can trim slides if timing slips.) Tj
+0 -16 Td
+(Leo: Smart, concise beats crowded slides every time.) Tj
+0 -16 Td
+(Mia: Before we wrap, any wins you want to celebrate?) Tj
+0 -16 Td
+(Leo: We cut false negatives a lot, and support tickets dropped.) Tj
+ET
+endstream
+endobj
+10 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 11 0 R >>
+endobj
+11 0 obj
+<< /Length 1207 >>
+stream
+BT
+/F1 10 Tf
+50 750 Td
+(Mia: That is huge, users definitely feel the difference.) Tj
+0 -16 Td
+(Leo: Seeing fewer confused messages is very motivating.) Tj
+0 -16 Td
+(Mia: Same, clarity is a quality feature, not just polish.) Tj
+0 -16 Td
+(Leo: Well said, we should put that on a team sticker.) Tj
+0 -16 Td
+(Mia: I would absolutely put that on my laptop.) Tj
+0 -16 Td
+(Leo: Okay, meeting starts in two minutes, ready?) Tj
+0 -16 Td
+(Mia: Ready, coffee in hand and dashboard open.) Tj
+0 -16 Td
+(Leo: Let's do this, steady and simple.) Tj
+0 -16 Td
+(Mia: Steady and simple, our favorite strategy.) Tj
+0 -16 Td
+(Leo: After the meeting, noodles and no pager alerts.) Tj
+0 -16 Td
+(Mia: That sounds like the perfect ending.) Tj
+0 -16 Td
+(Leo: If alerts happen, we handle them one step at a time.) Tj
+0 -16 Td
+(Mia: Exactly, breathe first, then debug.) Tj
+0 -16 Td
+(Leo: Thanks for always being calm and clear.) Tj
+0 -16 Td
+(Mia: Thanks for turning tricky problems into practical plans.) Tj
+0 -16 Td
+(Leo: Teamwork makes this job sustainable.) Tj
+0 -16 Td
+(Mia: And honestly, a lot more fun.) Tj
+0 -16 Td
+(Leo: Alright, I am joining the call now.) Tj
+0 -16 Td
+(Mia: See you inside, I will share my screen first.) Tj
+ET
+endstream
+endobj
+xref
+0 12
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000140 00000 n 
+0000000210 00000 n 
+0000000336 00000 n 
+0000002881 00000 n 
+0000003007 00000 n 
+0000005555 00000 n 
+0000005681 00000 n 
+0000008160 00000 n 
+0000008288 00000 n 
+trailer
+<< /Size 12 /Root 1 0 R >>
+startxref
+9547
+%%EOF
