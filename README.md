@@ -77,11 +77,16 @@ python -m google.adk.cli run adk_apps/pdf_qa_agent
 ADK agent 可用工具：
 - `set_active_pdf(pdf_path)`
 - `get_active_pdf()`
-- `summarize_pdf(pdf_path)`
+- `list_available_pdfs(limit=20)`
+- `summarize_pdf(pdf_path=None)`
 - `get_pdf_page(page_number, pdf_path=None)`
 - `lookup_pdf_index(question, pdf_path=None)`
 - `search_pdf(query, pdf_path=None, top_k=4)`
 - `answer_pdf_question(question, pdf_path=None)`
+
+備註：
+- 若未指定 `pdf_path`，agent 會自動使用目前 active PDF；若尚未設定，會自動選擇最近更新的 PDF。
+- `pdf_path` 支援完整路徑、相對路徑、或僅檔名（含中英文與空白差異的模糊比對）。
 
 建議的 ADK 多輪使用方式：
 1. 先呼叫 `set_active_pdf("sample_natural_dialog_127.pdf")`
@@ -167,6 +172,7 @@ BROAD_SEARCH_K=8
 
 4. Google ADK Agent 無法使用
 - 請確認 `.env` 內已設定 `GEMINI_API_KEY`
+- ADK Web 需要 `GOOGLE_API_KEY`（建議設成與 `GEMINI_API_KEY` 相同）
 - `pip install -r requirements.txt` 需成功安裝 `google-adk`
 - Google ADK Agent 目前使用 Gemini 作為底層模型
 - 可用 `GOOGLE_ADK_MODEL` 自訂，例如 `gemini-2.5-flash`
