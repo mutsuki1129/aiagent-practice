@@ -177,7 +177,7 @@ BROAD_SEARCH_K=8
 - Google ADK Agent 目前使用 Gemini 作為底層模型
 - 可用 `GOOGLE_ADK_MODEL` 自訂，例如 `gemini-2.5-flash`
 
-4. 中文 PDF 亂碼
+5. 中文 PDF 亂碼
 - `pdfplumber` 通常能處理
 - 若仍異常，可改用 `pymupdf`
 
