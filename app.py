@@ -23,6 +23,7 @@ from config import (
 )
 from models.gemma_local import get_gemma_llm
 from models.gemini_cloud import get_gemini_llm
+from rag.csv_loader import load_csv_and_split
 from rag.pdf_loader import load_and_split
 from rag.query_engine import (
     answer_with_document_index,
@@ -40,7 +41,6 @@ from rag.query_engine import (
     is_summary_query,
     normalize_text,
     should_use_literal_lookup,
-    summarize_page_docs,
 )
 from rag.vector_store import create_vector_store, get_retriever
 
@@ -48,6 +48,7 @@ _MODEL_STATUS_CACHE: str | None = None
 _MODEL_STATUS_LAST_TS = 0.0
 _MODEL_STATUS_TTL_SECONDS = 5.0
 _EXPANDABLE_THRESHOLD = 350
+_CSV_HIDDEN_FIELDS = {"source_pdf", "note", "page", "pdf", "pdf_path", "pdf_source"}
 
 
 def _friendly_model_error(exc: Exception) -> str:
@@ -107,6 +108,84 @@ def check_model_status() -> str:
     return status
 
 
+def _detect_source_type(doc: Any) -> str:
+    source_type = str(doc.metadata.get("source_type", "") or "").strip().lower()
+    if source_type:
+        return source_type
+    source = str(doc.metadata.get("source", "") or "").strip().lower()
+    if source.endswith(".csv"):
+        return "csv"
+    return "pdf"
+
+
+def _format_position_label(doc: Any) -> str:
+    position = doc.metadata.get("page", "?")
+    if _detect_source_type(doc) == "csv":
+        return f"第 {position} 列"
+    return f"第 {position} 頁"
+
+
+def _filtered_csv_fields(doc: Any) -> dict[str, str]:
+    fields = _extract_csv_fields(doc)
+    filtered: dict[str, str] = {}
+    for key, value in fields.items():
+        key_norm = key.strip().lower()
+        if key_norm in _CSV_HIDDEN_FIELDS:
+            continue
+        filtered[key] = value
+    return filtered
+
+
+def _format_csv_doc_content(doc: Any) -> str:
+    fields = _filtered_csv_fields(doc)
+    ordered_keys = ["code", "title", "title_excerpt", "definition"]
+    lines: list[str] = []
+    used: set[str] = set()
+
+    for key in ordered_keys:
+        for actual_key, value in fields.items():
+            if actual_key.strip().lower() != key:
+                continue
+            if not value:
+                continue
+            lines.append(f"{actual_key}: {_clean_ocr_text(value)}")
+            used.add(actual_key)
+
+    for actual_key, value in fields.items():
+        if actual_key in used:
+            continue
+        if not value:
+            continue
+        lines.append(f"{actual_key}: {_clean_ocr_text(value)}")
+
+    return "\n".join(lines).strip()
+
+
+def _summarize_position_docs(position_docs: list[Any], *, position_kind: str = "auto") -> str:
+    if not position_docs:
+        return "找不到你指定的位置內容。"
+
+    labels: list[str] = []
+    blocks: list[str] = []
+    for doc in position_docs:
+        label = _format_position_label(doc)
+        if label not in labels:
+            labels.append(label)
+        if _detect_source_type(doc) == "csv":
+            content = _format_csv_doc_content(doc)
+        else:
+            content = _clean_ocr_text(str(getattr(doc, "page_content", "") or ""))
+        blocks.append(f"[{label}]\n{content}")
+
+    if position_kind == "row":
+        head = f"你指定的位置是：{'、'.join(labels)}（CSV 以列為單位）。"
+    elif position_kind == "page":
+        head = f"你指定的位置是：{'、'.join(labels)}。"
+    else:
+        head = f"你指定的位置是：{'、'.join(labels)}。"
+    return f"{head}\n位置完整內容：\n" + "\n\n".join(blocks)
+
+
 def _format_retrieved_preview(source_docs: list[Any]) -> str:
     if not source_docs:
         return "尚無檢索結果。"
@@ -114,11 +193,14 @@ def _format_retrieved_preview(source_docs: list[Any]) -> str:
     lines: list[str] = []
     for idx, doc in enumerate(source_docs[:4], start=1):
         source = doc.metadata.get("source", "未知檔案")
-        page = doc.metadata.get("page", "?")
-        content = (doc.page_content or "").strip().replace("\n", " ")
+        position_label = _format_position_label(doc)
+        if _detect_source_type(doc) == "csv":
+            content = _format_csv_doc_content(doc).replace("\n", " ")
+        else:
+            content = (doc.page_content or "").strip().replace("\n", " ")
         if len(content) > 220:
             content = content[:220] + "..."
-        lines.append(f"{idx}. [{source} - 第 {page} 頁] {content}")
+        lines.append(f"{idx}. [{source} - {position_label}] {content}")
 
     return "\n\n".join(lines)
 
@@ -139,6 +221,149 @@ def _find_exact_matches(query: str, docs: list[Any]) -> list[Any]:
         if normalized_query in content:
             matches.append(doc)
     return matches
+
+
+def _extract_csv_fields(doc: Any) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    content = str(getattr(doc, "page_content", "") or "")
+    for line in content.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key_text = key.strip()
+        value_text = value.strip()
+        if key_text:
+            fields[key_text] = value_text
+    return fields
+
+
+def _clean_ocr_text(text: str) -> str:
+    cleaned = (text or "").replace("\u3000", " ")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])", "", cleaned)
+    cleaned = re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=[，。；：！？、）】」』])", "", cleaned)
+    cleaned = re.sub(r"(?<=[（【「『])\s+(?=[\u4e00-\u9fff])", "", cleaned)
+    return cleaned
+
+
+def _question_terms_for_match(question: str) -> list[str]:
+    normalized = _normalize_text(question)
+    cleaned = normalized
+    for marker in ("是什麼", "是甚麼", "什麼", "請問", "介紹", "說明", "內容", "定義", "嗎", "呢"):
+        cleaned = cleaned.replace(marker, " ")
+    cleaned = re.sub(r"[^\w\u4e00-\u9fff]+", " ", cleaned)
+
+    terms: list[str] = []
+    terms.extend([term for term in cleaned.split() if len(term) >= 2])
+    terms.extend(re.findall(r"[\u4e00-\u9fff]{2,}", cleaned))
+    terms.extend(re.findall(r"[a-z0-9][a-z0-9_-]{1,}", cleaned))
+
+    stop_terms = {"請", "一下", "可以", "the", "what", "about", "row"}
+    deduped: list[str] = []
+    for term in terms:
+        if term in stop_terms:
+            continue
+        if term not in deduped:
+            deduped.append(term)
+    return deduped
+
+
+def _try_csv_direct_answer(user_question: str, all_docs: list[Any]) -> tuple[str, list[Any]] | None:
+    csv_docs = [doc for doc in all_docs if _detect_source_type(doc) == "csv"]
+    if not csv_docs:
+        return None
+
+    normalized_question = _normalize_text(user_question)
+    terms = _question_terms_for_match(user_question)
+    phrase = normalized_question
+    for marker in ("是什麼", "是甚麼", "什麼", "請問", "介紹", "說明", "內容", "定義", "嗎", "呢", "？", "?"):
+        phrase = phrase.replace(marker, " ")
+    phrase = re.sub(r"\s+", " ", phrase).strip()
+    code_match = re.search(r"\b[0-9A-Z]{4,6}\b", user_question.upper())
+    code = code_match.group(0) if code_match else ""
+
+    scored: list[tuple[int, Any, dict[str, str]]] = []
+    for doc in csv_docs:
+        fields = _extract_csv_fields(doc)
+        text = _normalize_text(str(getattr(doc, "page_content", "") or ""))
+        score = 0
+        if code and code in text.upper():
+            score += 6
+        for term in terms:
+            if term in text:
+                score += 2
+        if phrase and phrase in text:
+            score += 5
+        if phrase:
+            overlap = len({ch for ch in phrase if ch.strip() and ch in text})
+            if overlap >= 3:
+                score += min(6, overlap)
+        if normalized_question and normalized_question in text:
+            score += 4
+        if score > 0:
+            scored.append((score, doc, fields))
+
+    if not scored:
+        return None
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+    top_score = scored[0][0]
+    best = [item for item in scored if item[0] >= max(2, top_score - 1)][:2]
+    selected_docs = [item[1] for item in best]
+    top_fields = best[0][2]
+
+    code_text = top_fields.get("code", "")
+    title_text = _clean_ocr_text(top_fields.get("title_excerpt", "") or top_fields.get("title", ""))
+    definition_text = _clean_ocr_text(top_fields.get("definition", "") or "")
+    if not title_text and definition_text:
+        title_text = definition_text
+    position = _format_position_label(best[0][1])
+
+    lines = ["已在 CSV 中找到相符資料。"]
+    if code_text:
+        lines.append(f"- 代碼：{code_text}")
+    if title_text:
+        lines.append(f"- 標題：{title_text}")
+    if definition_text and definition_text != title_text:
+        lines.append(f"- 定義：{definition_text}")
+    lines.append(f"- 來源：{position}")
+
+    if len(best) > 1:
+        alt_fields = best[1][2]
+        alt_code = alt_fields.get("code", "").strip()
+        alt_title = (
+            alt_fields.get("title_excerpt", "")
+            or alt_fields.get("title", "")
+            or alt_fields.get("definition", "")
+        )
+        alt_title = _clean_ocr_text(alt_title)
+        if alt_code or alt_title:
+            lines.append("- 可能相關：")
+            lines.append(f"  {alt_code} {alt_title}".strip())
+
+    return "\n".join(lines), selected_docs
+
+
+def _extract_row_numbers(user_question: str) -> list[int]:
+    text = user_question.strip().lower()
+    numbers: set[int] = set()
+    patterns = (
+        r"第\s*(\d+)\s*(?:列|行)",
+        r"\brow\s*(\d+)\b",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            try:
+                value = int(match.group(1))
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                numbers.add(value)
+    return sorted(numbers)
+
+
+def _is_row_query(user_question: str) -> bool:
+    return bool(_extract_row_numbers(user_question))
 
 
 def _is_summary_like_question(user_question: str) -> bool:
@@ -241,10 +466,9 @@ def _to_expandable_answer(answer: str, threshold: int = _EXPANDABLE_THRESHOLD) -
 
 def _build_exact_match_answer(query: str, docs: list[Any]) -> str:
     snippets: list[str] = []
-    pages: set[str] = set()
+    locations: set[str] = set()
     for doc in docs[:3]:
-        page = doc.metadata.get("page", "?")
-        pages.add(f"第 {page} 頁")
+        locations.add(_format_position_label(doc))
         content = (doc.page_content or "").strip().replace("\n", " ")
         if len(content) > 180:
             content = content[:180] + "..."
@@ -257,8 +481,8 @@ def _build_exact_match_answer(query: str, docs: list[Any]) -> str:
     if snippets:
         lines.append("\n相符段落：")
         lines.extend(snippets)
-    if pages:
-        lines.append(f"\n參考來源： {', '.join(sorted(pages))}")
+    if locations:
+        lines.append(f"\n參考來源： {', '.join(sorted(locations))}")
     return "\n".join(lines)
 
 
@@ -384,9 +608,9 @@ def _build_reasoning_prompt(
 
     context_blocks: list[str] = []
     for doc in context_docs[:10]:
-        page = doc.metadata.get("page", "?")
+        position_label = _format_position_label(doc)
         text = (doc.page_content or "").strip()
-        context_blocks.append(f"[第 {page} 頁]\n{text}")
+        context_blocks.append(f"[{position_label}]\n{text}")
     joined_context = "\n\n".join(context_blocks)
 
     hint_block = candidate_hint.strip() or candidate_block
@@ -455,11 +679,11 @@ def _is_index_document_mode(detected_mode: str | None) -> bool:
 def _build_generic_summary_prompt(user_question: str, all_docs: list[Any]) -> str:
     intro_blocks: list[str] = []
     for doc in all_docs[: min(len(all_docs), 6)]:
-        page = doc.metadata.get("page", "?")
+        position_label = _format_position_label(doc)
         text = (doc.page_content or "").strip().replace("\n", " ")
         if len(text) > 360:
             text = text[:360] + "..."
-        intro_blocks.append(f"[第 {page} 頁] {text}")
+        intro_blocks.append(f"[{position_label}] {text}")
 
     context = "\n\n".join(intro_blocks) if intro_blocks else "目前沒有可用的文件內容。"
     return (
@@ -631,6 +855,7 @@ def _should_bypass_llm_for_query(user_question: str) -> bool:
     question = user_question.strip()
     return (
         is_page_query(question)
+        or _is_row_query(question)
         or is_code_or_lookup_query(question)
         or should_use_literal_lookup(question)
     )
@@ -645,8 +870,19 @@ def _resolve_query_mode(mode_choice: str, detected_mode: str) -> str:
 def _format_doc_mode_status(detected_mode: str) -> str:
     if detected_mode == "index":
         return "### 文件模式\n- 自動判定：`索引型 PDF`\n- 目前策略：`混合式`\n- 說明：先讓模型根據檢索內容生成；若模型失手，再退回結構化候選答案。"
+    if detected_mode == "csv":
+        return "### 文件模式\n- 自動判定：`CSV`\n- 目前策略：`列優先`\n- 說明：CSV 來源與定位單位使用「列」，不使用頁碼。"
     return "### 文件模式\n- 自動判定：`一般 PDF`\n- 目前策略：`混合式`\n- 說明：保留 RAG + LLM 推理，必要時以結構化候選答案補強。"
 
+
+
+def _load_documents(file_path: str) -> list[Document]:
+    suffix = Path(file_path).suffix.lower()
+    if suffix == ".pdf":
+        return load_and_split(file_path)
+    if suffix == ".csv":
+        return load_csv_and_split(file_path)
+    raise ValueError(f"目前不支援的檔案格式：{suffix}")
 
 
 def process_uploaded_pdfs(files: list[str] | None):
@@ -654,7 +890,7 @@ def process_uploaded_pdfs(files: list[str] | None):
         return (
             None,
             {},
-            "請先上傳至少一份 PDF。",
+            "請先上傳至少一份 PDF 或 CSV。",
             check_model_status(),
             _format_doc_mode_status("general"),
             "尚無檢索結果。",
@@ -672,7 +908,7 @@ def process_uploaded_pdfs(files: list[str] | None):
 
     try:
         for file_path in files:
-            docs = load_and_split(file_path)
+            docs = _load_documents(file_path)
             all_docs.extend(docs)
             used_files.append(Path(file_path).name)
             for doc in docs:
@@ -681,13 +917,22 @@ def process_uploaded_pdfs(files: list[str] | None):
                 if source and page > 0:
                     unique_pages.add((source, page))
 
-        document_index = build_document_index(all_docs)
-        detected_mode = detect_document_mode(document_index, all_docs)
+        has_pdf_docs = any(_detect_source_type(doc) == "pdf" for doc in all_docs)
+        has_csv_docs = any(_detect_source_type(doc) == "csv" for doc in all_docs)
+        if has_pdf_docs:
+            document_index = build_document_index(all_docs)
+            detected_mode = detect_document_mode(document_index, all_docs)
+        elif has_csv_docs:
+            document_index = {}
+            detected_mode = "csv"
+        else:
+            document_index = {}
+            detected_mode = "general"
         vector_store = create_vector_store(all_docs)
         retriever = get_retriever(vector_store, top_k=TOP_K)
 
         status = (
-            f"已載入 {len(unique_pages)} 頁，切割為 {len(all_docs)} 個段落。"
+            f"已載入 {len(unique_pages)} 個來源位置（PDF 以頁、CSV 以列），切割為 {len(all_docs)} 個段落。"
             f"\n檔案：{', '.join(used_files)}"
         )
         return (
@@ -707,7 +952,7 @@ def process_uploaded_pdfs(files: list[str] | None):
         return (
             None,
             {},
-            f"PDF 處理失敗：{exc}",
+            f"檔案處理失敗：{exc}",
             check_model_status(),
             _format_doc_mode_status("general"),
             "尚無檢索結果。",
@@ -740,7 +985,7 @@ def ask_question(
         return history, "", check_model_status(), "請輸入問題。", conversations
 
     if retriever is None:
-        history.append({"role": "assistant", "content": "請先上傳並處理 PDF，完成後再開始提問。"})
+        history.append({"role": "assistant", "content": "請先上傳並處理檔案（PDF 或 CSV），完成後再開始提問。"})
         return history, "", check_model_status(), "尚無檢索結果。", conversations
 
     if model_choice.startswith("Google ADK"):
@@ -766,32 +1011,79 @@ def ask_question(
         context_docs: list[Any] = []
         candidate_hint = ""
         normalized_question = user_question.strip()
+        has_csv_docs = any(_detect_source_type(doc) == "csv" for doc in all_docs)
+        has_pdf_docs = any(_detect_source_type(doc) == "pdf" for doc in all_docs)
+        if has_csv_docs and not has_pdf_docs:
+            detected_mode_state = "csv"
         list_query = any(marker in normalized_question for marker in ("有哪些", "有哪一些", "相關分類"))
         lookup_query = is_code_or_lookup_query(normalized_question)
-        page_lookup = is_page_query(normalized_question)
+        row_lookup = _is_row_query(normalized_question)
+        page_lookup = is_page_query(normalized_question) or row_lookup
         inference_query = _is_general_inference_question(normalized_question)
         summary_query = _is_summary_like_question(normalized_question) and not inference_query
+
+        csv_direct = _try_csv_direct_answer(user_question, all_docs)
+        if csv_direct is not None and not summary_query and not page_lookup:
+            answer, context_docs = csv_direct
+            preview = _format_retrieved_preview(context_docs)
+            history.append({"role": "user", "content": user_question})
+            history.append({"role": "assistant", "content": _to_expandable_answer(answer)})
+            conversations.append((user_question, answer))
+            return history, "", check_model_status(), preview, conversations
+
         try:
+            csv_speed_override = (
+                min(OLLAMA_NUM_PREDICT, 128)
+                if model_choice.startswith("Gemma") and has_csv_docs and not summary_query
+                else None
+            )
             llm = _resolve_llm(
                 model_choice,
-                num_predict_override=_gemma_num_predict_for_query(
-                    is_summary=summary_query,
-                    is_list_query=list_query,
-                    is_lookup_query=lookup_query,
-                    is_page_lookup=page_lookup,
+                num_predict_override=(
+                    csv_speed_override
+                    if csv_speed_override is not None
+                    else _gemma_num_predict_for_query(
+                        is_summary=summary_query,
+                        is_list_query=list_query,
+                        is_lookup_query=lookup_query,
+                        is_page_lookup=page_lookup,
+                    )
                 ),
             )
             if page_lookup:
-                pages = extract_page_numbers(user_question)
-                context_docs = [
-                    doc
-                    for doc in all_docs
-                    if int(doc.metadata.get("page", 0) or 0) in pages
-                ]
+                positions = _extract_row_numbers(user_question) if row_lookup else extract_page_numbers(user_question)
+                if not positions:
+                    unit_hint = "列號" if row_lookup else "頁碼"
+                    answer = f"請在問題中指定有效的{unit_hint}（例如：第 3 {'列' if row_lookup else '頁'}）。"
+                    preview = _format_retrieved_preview(context_docs)
+                    history.append({"role": "user", "content": user_question})
+                    history.append({"role": "assistant", "content": _to_expandable_answer(answer)})
+                    conversations.append((user_question, answer))
+                    return history, "", check_model_status(), preview, conversations
+                context_docs = []
+                for doc in all_docs:
+                    source_type = _detect_source_type(doc)
+                    if row_lookup and source_type != "csv":
+                        continue
+                    if (not row_lookup) and source_type == "csv":
+                        continue
+                    if int(doc.metadata.get("page", 0) or 0) in positions:
+                        context_docs.append(doc)
                 if not context_docs:
-                    answer = f"文件中找不到你指定的頁碼：{', '.join(f'第 {page} 頁' for page in pages)}。"
+                    unit = "列" if row_lookup else "頁"
+                    answer = f"文件中找不到你指定的位置：{', '.join(f'第 {position} {unit}' for position in positions)}。"
                 else:
-                    candidate_hint = summarize_page_docs(context_docs)
+                    candidate_hint = _summarize_position_docs(
+                        context_docs,
+                        position_kind="row" if row_lookup else "page",
+                    )
+                    if row_lookup:
+                        answer = candidate_hint
+                        preview = _format_retrieved_preview(context_docs)
+                        history.append({"role": "user", "content": user_question})
+                        history.append({"role": "assistant", "content": _to_expandable_answer(answer)})
+                        conversations.append((user_question, answer))
+                        return history, "", check_model_status(), preview, conversations
                     if _should_use_candidate_directly(
                         candidate_hint,
                         detected_mode=detected_mode_state,
@@ -816,7 +1108,7 @@ def ask_question(
                             detected_mode_state,
                             candidate_hint,
                         )
-                        answer = _invoke_llm_text(llm, prompt) or summarize_page_docs(context_docs)
+                        answer = _invoke_llm_text(llm, prompt) or candidate_hint
                         answer = _finalize_hybrid_answer(answer, candidate_hint)
                 preview = _format_retrieved_preview(context_docs)
                 history.append({"role": "user", "content": user_question})
@@ -932,22 +1224,53 @@ def ask_question(
             # If Gemini fails (quota/network), automatically fallback to local Gemma.
             if not model_choice.startswith("Gemma"):
                 try:
+                    csv_speed_override = (
+                        min(OLLAMA_NUM_PREDICT, 128)
+                        if has_csv_docs and not summary_query
+                        else None
+                    )
                     llm = get_gemma_llm(
-                        num_predict_override=_gemma_num_predict_for_query(
-                            is_summary=summary_query,
-                            is_list_query=list_query,
-                            is_lookup_query=lookup_query,
-                            is_page_lookup=page_lookup,
+                        num_predict_override=(
+                            csv_speed_override
+                            if csv_speed_override is not None
+                            else _gemma_num_predict_for_query(
+                                is_summary=summary_query,
+                                is_list_query=list_query,
+                                is_lookup_query=lookup_query,
+                                is_page_lookup=page_lookup,
+                            )
                         )
                     )
                     if page_lookup:
-                        pages = extract_page_numbers(user_question)
-                        context_docs = [
-                            doc
-                            for doc in all_docs
-                            if int(doc.metadata.get("page", 0) or 0) in pages
-                        ]
-                        candidate_hint = summarize_page_docs(context_docs)
+                        positions = _extract_row_numbers(user_question) if row_lookup else extract_page_numbers(user_question)
+                        if not positions:
+                            unit_hint = "列號" if row_lookup else "頁碼"
+                            answer = f"請在問題中指定有效的{unit_hint}（例如：第 3 {'列' if row_lookup else '頁'}）。"
+                            preview = _format_retrieved_preview(context_docs)
+                            history.append({"role": "user", "content": user_question})
+                            history.append({"role": "assistant", "content": _to_expandable_answer(answer)})
+                            conversations.append((user_question, answer))
+                            return history, "", check_model_status(), preview, conversations
+                        context_docs = []
+                        for doc in all_docs:
+                            source_type = _detect_source_type(doc)
+                            if row_lookup and source_type != "csv":
+                                continue
+                            if (not row_lookup) and source_type == "csv":
+                                continue
+                            if int(doc.metadata.get("page", 0) or 0) in positions:
+                                context_docs.append(doc)
+                        candidate_hint = _summarize_position_docs(
+                            context_docs,
+                            position_kind="row" if row_lookup else "page",
+                        )
+                        if row_lookup:
+                            answer = candidate_hint
+                            preview = _format_retrieved_preview(context_docs)
+                            history.append({"role": "user", "content": user_question})
+                            history.append({"role": "assistant", "content": _to_expandable_answer(answer)})
+                            conversations.append((user_question, answer))
+                            return history, "", check_model_status(), preview, conversations
                         if _should_use_candidate_directly(
                             candidate_hint,
                             detected_mode=detected_mode_state,
@@ -972,7 +1295,7 @@ def ask_question(
                                 detected_mode_state,
                                 candidate_hint,
                             )
-                            answer = _invoke_llm_text(llm, prompt) or summarize_page_docs(context_docs)
+                            answer = _invoke_llm_text(llm, prompt) or candidate_hint
                             answer = _finalize_hybrid_answer(answer, candidate_hint)
                     elif summary_query:
                         context_docs = all_docs[: min(len(all_docs), 8)]
@@ -1094,15 +1417,15 @@ def ask_question(
             answer = _build_exact_match_answer(user_question, exact_matches)
         preview = _format_retrieved_preview(source_docs)
 
-        pages = sorted(
+        locations = sorted(
             {
-                f"第 {doc.metadata.get('page', '?')} 頁"
+                _format_position_label(doc)
                 for doc in source_docs
                 if doc.metadata.get("page") is not None
             }
         )
-        if pages:
-            answer = f"{answer}\n\n參考來源：{'、'.join(pages)}"
+        if locations:
+            answer = f"{answer}\n\n參考來源：{'、'.join(locations)}"
         if fallback_note:
             answer = f"{answer}\n\n{fallback_note}"
 
@@ -1120,22 +1443,22 @@ def clear_chat():
 
 
 def build_app() -> gr.Blocks:
-    with gr.Blocks(title="PDF 智能問答系統") as demo:
+    with gr.Blocks(title="文件智能問答系統") as demo:
         retriever_state = gr.State(value=None)
         document_index_state = gr.State(value={})
         all_docs_state = gr.State(value=[])
         conversation_state = gr.State(value=[])
         detected_mode_state = gr.State(value="general")
 
-        gr.Markdown("# 📄 PDF 智能問答系統")
-        gr.Markdown("支援 Gemma 4 本地模型（Ollama）、Gemini 雲端模型，以及嵌入式 Google ADK Agent。")
+        gr.Markdown("# 📄 文件智能問答系統")
+        gr.Markdown("支援 PDF / CSV 上傳，並可使用 Gemma 4 本地模型（Ollama）、Gemini 雲端模型，以及嵌入式 Google ADK Agent。")
 
         with gr.Row():
             with gr.Column(scale=1):
                 uploader = gr.File(
-                    label="上傳 PDF（可多檔）",
+                    label="上傳檔案（PDF / CSV，可多檔）",
                     file_count="multiple",
-                    file_types=[".pdf"],
+                    file_types=[".pdf", ".csv"],
                     type="filepath",
                 )
                 model_choice = gr.Dropdown(
@@ -1148,14 +1471,14 @@ def build_app() -> gr.Blocks:
                     choices=["自動", "通用推理模式"],
                     value="通用推理模式",
                 )
-                process_status = gr.Markdown("尚未載入 PDF。")
+                process_status = gr.Markdown("尚未載入檔案。")
 
             with gr.Column(scale=2):
                 chatbot = gr.Chatbot(label="對話區", height=480)
                 with gr.Row():
                     user_input = gr.Textbox(
                         label="輸入問題",
-                        placeholder="請輸入你想問 PDF 的問題...",
+                        placeholder="請輸入你想問檔案內容的問題...",
                         interactive=False,
                     )
                     send_btn = gr.Button("送出", variant="primary", interactive=False)

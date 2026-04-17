@@ -1,0 +1,17 @@
+[
+  {
+    "name": "csv_code_lookup_6C41",
+    "tool": "answer_document_question",
+    "question": "what is 6C41",
+    "file_path": "icd_csv_test_sample.csv",
+    "expected_keywords": ["6C41", "6"]
+  },
+  {
+    "name": "csv_row_lookup_2",
+    "tool": "get_document_position",
+    "position_number": 2,
+    "file_path": "icd_csv_test_sample.csv",
+    "expected_keywords": ["2", "6B85"]
+  }
+]
+
