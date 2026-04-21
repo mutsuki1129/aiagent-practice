@@ -53,6 +53,19 @@ def main() -> None:
     doc_list = tools.list_available_documents(limit=10)
     failures += _require_contains(doc_list, ['.pdf', '.csv'], 'list_available_documents')
 
+    # Web path (best-effort): skip when network/site is unavailable.
+    try:
+        web_set = tools.set_active_web("https://example.com")
+        failures += _require_contains(web_set, ["https://example.com"], "set_active_web")
+        web_answer = tools.answer_document_question("這個網頁主要在講什麼？", "https://example.com")
+        if len(web_answer.strip()) < 10:
+            failures.append("answer_document_question(web) output too short")
+        inline_web_answer = tools.answer_document_question("https://example.com 這個網頁主要在講什麼？")
+        if len(inline_web_answer.strip()) < 10:
+            failures.append("answer_document_question(inline web url) output too short")
+    except Exception as exc:
+        print(f'Web regression skipped: {exc}')
+
     elapsed = time.perf_counter() - started_at
     print(f'Elapsed: {elapsed:.2f}s')
     if elapsed > MAX_SECONDS:

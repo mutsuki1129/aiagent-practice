@@ -9,6 +9,7 @@ from typing import Any
 
 from rag.csv_loader import load_csv_and_split
 from rag.pdf_loader import load_and_split
+from rag.web_loader import load_web_and_split
 from rag.query_engine import (
     answer_with_document_index,
     build_document_index,
@@ -38,6 +39,8 @@ def _detect_source_type(doc: Any) -> str:
     if source_type:
         return source_type
     source = str(doc.metadata.get("source", "") or "").strip().lower()
+    if source.startswith(("http://", "https://")):
+        return "web"
     if source.endswith(".csv"):
         return "csv"
     return "pdf"
@@ -45,9 +48,34 @@ def _detect_source_type(doc: Any) -> str:
 
 def _format_position_label(doc: Any) -> str:
     pos = int(doc.metadata.get("page", 0) or 0)
-    if _detect_source_type(doc) == "csv":
+    source_type = _detect_source_type(doc)
+    if source_type == "csv":
         return f"第 {pos} 列"
+    if source_type == "web":
+        return f"第 {pos} 段"
     return f"第 {pos} 頁"
+
+
+def _is_web_url(value: str) -> bool:
+    text = (value or "").strip().lower()
+    return text.startswith(("http://", "https://"))
+
+
+def _extract_urls_from_text(text: str) -> list[str]:
+    raw = text or ""
+    matches = re.findall(r"https?://[^\s\"'<>]+", raw, flags=re.I)
+    cleaned: list[str] = []
+    for item in matches:
+        url = item.strip().rstrip(").,;!?，。；！？")
+        if _is_web_url(url) and url not in cleaned:
+            cleaned.append(url)
+    return cleaned
+
+
+def _strip_urls_from_text(text: str) -> str:
+    cleaned = re.sub(r"https?://[^\s\"'<>]+", " ", text or "", flags=re.I)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
 
 
 def _clean_ocr_text(text: str) -> str:
@@ -148,6 +176,26 @@ def _format_preview_docs(docs: list[Any], limit: int = 4) -> str:
 
 @lru_cache(maxsize=16)
 def _load_document_runtime(document_path: str) -> dict[str, Any]:
+    if _is_web_url(document_path):
+        docs = load_web_and_split(document_path)
+        doc_index = {}
+        detected_mode = "web"
+        retriever = None
+        vector_error = ""
+        try:
+            retriever = get_retriever(create_vector_store(docs), top_k=4)
+        except Exception as exc:  # pragma: no cover
+            vector_error = str(exc)
+        return {
+            "docs": docs,
+            "doc_index": doc_index,
+            "detected_mode": detected_mode,
+            "retriever": retriever,
+            "vector_error": vector_error,
+            "source_type": "web",
+            "path": document_path,
+        }
+
     ext = Path(document_path).suffix.lower()
     if ext == ".pdf":
         docs = load_and_split(document_path)
@@ -266,6 +314,10 @@ def _extract_hints_from_context(tool_context: ToolContext | None) -> list[str]:
     seen: set[str] = set()
 
     def _push(text: str) -> None:
+        for url in _extract_urls_from_text(text):
+            if url not in seen:
+                seen.add(url)
+                candidates.append(url)
         for match in re.findall(r"[A-Za-z0-9_\-\u4e00-\u9fff ()]+\.(?:pdf|csv)", text, flags=re.I):
             key = match.strip()
             if key and key not in seen:
@@ -348,6 +400,9 @@ def _match_document_from_name(file_hint: str, *, prefer_ext: str | None = None) 
 
 
 def _validate_document_path(file_path: str, *, prefer_ext: str | None = None) -> str:
+    if _is_web_url(file_path):
+        return str(file_path).strip()
+
     matched = _match_document_from_name(file_path, prefer_ext=prefer_ext)
     if matched is None:
         matched = _match_document_from_name(file_path, prefer_ext=prefer_ext)
@@ -365,6 +420,18 @@ def _resolve_active_document(
 ) -> str:
     if file_path and str(file_path).strip():
         requested = str(file_path).strip()
+        if _is_web_url(requested):
+            if prefer_ext is not None:
+                raise ValueError(f"目前操作限定 {prefer_ext} 檔案，不接受網頁 URL。")
+            if tool_context is not None and hasattr(tool_context, "state"):
+                tool_context.state["active_document_path"] = requested
+                tool_context.state["active_web_url"] = requested
+                history = list(tool_context.state.get("active_web_urls", []))
+                if requested in history:
+                    history.remove(requested)
+                history.insert(0, requested)
+                tool_context.state["active_web_urls"] = history[:10]
+            return requested
         try:
             resolved = _validate_document_path(requested, prefer_ext=prefer_ext)
             if tool_context is not None and hasattr(tool_context, "state"):
@@ -384,9 +451,23 @@ def _resolve_active_document(
     if tool_context is not None and hasattr(tool_context, "state"):
         active = tool_context.state.get("active_document_path") or tool_context.state.get("active_pdf_path")
         if active:
+            if _is_web_url(str(active)):
+                return str(active)
             return _validate_document_path(str(active), prefer_ext=prefer_ext)
 
     for hint in _extract_hints_from_context(tool_context):
+        if _is_web_url(hint):
+            if prefer_ext is not None:
+                continue
+            if tool_context is not None and hasattr(tool_context, "state"):
+                tool_context.state["active_document_path"] = hint
+                tool_context.state["active_web_url"] = hint
+                history = list(tool_context.state.get("active_web_urls", []))
+                if hint in history:
+                    history.remove(hint)
+                history.insert(0, hint)
+                tool_context.state["active_web_urls"] = history[:10]
+            return hint
         matched = _match_document_from_name(hint, prefer_ext=prefer_ext)
         if matched:
             resolved = str(matched.resolve())
@@ -419,7 +500,12 @@ def _resolve_active_document(
 
 
 def _build_general_summary(docs: list[Any], *, source_type: str) -> str:
-    unit = "列" if source_type == "csv" else "頁"
+    if source_type == "csv":
+        unit = "列"
+    elif source_type == "web":
+        unit = "段"
+    else:
+        unit = "頁"
     count = len({int(doc.metadata.get("page", 0) or 0) for doc in docs if doc.metadata.get("page")})
     sample_docs = docs[: min(len(docs), 6)]
     text = "\n".join((doc.page_content or "").strip() for doc in sample_docs)
@@ -473,6 +559,28 @@ def _extract_row_numbers(query: str) -> list[int]:
 
 def _is_row_query(query: str) -> bool:
     return bool(_extract_row_numbers(query))
+
+
+def _extract_segment_numbers(query: str) -> list[int]:
+    text = query.strip().lower()
+    numbers: set[int] = set()
+    patterns = (
+        r"第\s*(\d+)\s*段",
+        r"\bsegment\s*(\d+)\b",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            try:
+                value = int(match.group(1))
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                numbers.add(value)
+    return sorted(numbers)
+
+
+def _is_segment_query(query: str) -> bool:
+    return bool(_extract_segment_numbers(query))
 
 
 def _try_csv_direct_answer(question: str, docs: list[Any]) -> str | None:
@@ -551,6 +659,8 @@ def get_active_document(tool_context: ToolContext | None = None) -> str:
     if tool_context is not None and hasattr(tool_context, "state"):
         active = tool_context.state.get("active_document_path") or tool_context.state.get("active_pdf_path")
         if active:
+            if _is_web_url(str(active)):
+                return f"目前使用中的網頁：{active}"
             return f"目前使用中的文件：{active}"
     latest = _latest_document_file()
     if latest:
@@ -562,15 +672,25 @@ def get_active_document(tool_context: ToolContext | None = None) -> str:
     return "目前尚未設定 active 文件，且找不到可用檔案。"
 
 
-def list_available_documents(limit: int = 20) -> str:
+def list_available_documents(limit: int = 20, tool_context: ToolContext | None = None) -> str:
     """List locally discoverable PDF/CSV files for quick selection."""
     files = sorted(_discover_documents(), key=lambda p: p.stat().st_mtime, reverse=True)
-    if not files:
+    if not files and not (tool_context is not None and hasattr(tool_context, "state")):
         return "目前找不到任何 PDF/CSV 檔案。"
     max_items = max(1, min(limit, 50))
     lines = ["目前可用文件（依最後修改時間排序）："]
     for p in files[:max_items]:
         lines.append(f"- {p.name} | {p.resolve()}")
+
+    if tool_context is not None and hasattr(tool_context, "state"):
+        web_urls = list(tool_context.state.get("active_web_urls", []))
+        if web_urls:
+            lines.append("目前已記錄的網頁來源：")
+            for url in web_urls[:max_items]:
+                lines.append(f"- {url}")
+
+    if len(lines) == 1:
+        lines.append("- （尚無文件或網頁來源）")
     return "\n".join(lines)
 
 
@@ -591,15 +711,35 @@ def get_document_position(position_number: int, file_path: str | None = None, to
     runtime = _load_document_runtime(resolved)
     docs = [doc for doc in runtime["docs"] if int(doc.metadata.get("page", 0) or 0) == int(position_number)]
     if not docs:
-        unit = "列" if runtime["source_type"] == "csv" else "頁"
+        if runtime["source_type"] == "csv":
+            unit = "列"
+        elif runtime["source_type"] == "web":
+            unit = "段"
+        else:
+            unit = "頁"
         return f"文件中找不到第 {position_number} {unit}。"
-    return _summarize_position_docs(docs, position_kind="row" if runtime["source_type"] == "csv" else "page")
+    if runtime["source_type"] == "csv":
+        position_kind = "row"
+    elif runtime["source_type"] == "web":
+        position_kind = "segment"
+    else:
+        position_kind = "page"
+    return _summarize_position_docs(docs, position_kind=position_kind)
 
 
 def search_document(query: str, file_path: str | None = None, top_k: int = 4, tool_context: ToolContext | None = None) -> str:
-    """Search active PDF/CSV and return relevant passages with page/row labels."""
-    resolved = _resolve_active_document(file_path, tool_context)
+    """Search active PDF/CSV/Web and return relevant passages with location labels."""
+    query = (query or "").strip()
+    candidate_file = file_path
+    if (not candidate_file or not str(candidate_file).strip()) and query:
+        inline_urls = _extract_urls_from_text(query)
+        if inline_urls:
+            candidate_file = inline_urls[0]
+    resolved = _resolve_active_document(candidate_file, tool_context)
     runtime = _load_document_runtime(resolved)
+    if runtime["source_type"] == "web":
+        stripped = _strip_urls_from_text(query)
+        query = stripped or "這個網頁重點"
     max_k = max(1, min(top_k, 8))
     if runtime["retriever"] is not None:
         scored = hybrid_retrieve(query.strip(), runtime["docs"], runtime["retriever"], top_k=max_k)
@@ -622,10 +762,24 @@ def lookup_document_index(question: str, file_path: str | None = None, tool_cont
 
 
 def answer_document_question(question: str, file_path: str | None = None, tool_context: ToolContext | None = None) -> str:
-    """Answer a question using evidence from active PDF/CSV."""
-    resolved = _resolve_active_document(file_path, tool_context)
+    """Answer a question using evidence from active PDF/CSV/Web."""
+    question = (question or "").strip()
+
+    candidate_file = file_path
+    if (not candidate_file or not str(candidate_file).strip()) and question:
+        inline_urls = _extract_urls_from_text(question)
+        if inline_urls:
+            candidate_file = inline_urls[0]
+
+    resolved = _resolve_active_document(candidate_file, tool_context)
     runtime = _load_document_runtime(resolved)
-    question = question.strip()
+
+    if runtime["source_type"] == "web":
+        stripped = _strip_urls_from_text(question)
+        if stripped:
+            question = stripped
+        else:
+            question = "這個網頁主要在講什麼？"
 
     if runtime["source_type"] == "csv" and _is_row_query(question):
         rows = _extract_row_numbers(question)
@@ -636,6 +790,10 @@ def answer_document_question(question: str, file_path: str | None = None, tool_c
         pages = extract_page_numbers(question)
         if pages:
             return get_document_position(pages[0], file_path=resolved, tool_context=tool_context)
+    if runtime["source_type"] == "web" and _is_segment_query(question):
+        segments = _extract_segment_numbers(question)
+        if segments:
+            return get_document_position(segments[0], file_path=resolved, tool_context=tool_context)
 
     if runtime["source_type"] == "csv":
         direct = _try_csv_direct_answer(question, runtime["docs"])
@@ -659,6 +817,42 @@ def answer_document_question(question: str, file_path: str | None = None, tool_c
             return _format_preview_docs(docs, limit=3)
 
     return search_document(question, file_path=resolved, top_k=4, tool_context=tool_context)
+
+
+# -------------------------
+# Optional Web convenience tools
+# -------------------------
+
+def set_active_web(web_url: str, tool_context: ToolContext | None = None) -> str:
+    """Set active web URL explicitly."""
+    resolved = _resolve_active_document(web_url, tool_context)
+    if not _is_web_url(resolved):
+        raise ValueError(f"這不是有效的 Web URL：{web_url}")
+    return f"已設定目前網頁：{resolved}"
+
+
+def get_active_web(tool_context: ToolContext | None = None) -> str:
+    """Return the current active web URL."""
+    if tool_context is not None and hasattr(tool_context, "state"):
+        active = tool_context.state.get("active_web_url") or tool_context.state.get("active_document_path")
+        if active and _is_web_url(str(active)):
+            return f"目前使用中的網頁：{active}"
+    return "目前尚未設定 active 網頁。請先使用 set_active_web(url)。"
+
+
+def list_active_webs(limit: int = 20, tool_context: ToolContext | None = None) -> str:
+    """List remembered web URLs in this ADK session."""
+    if tool_context is None or not hasattr(tool_context, "state"):
+        return "目前沒有可讀取的工具上下文，無法列出網頁來源。"
+
+    urls = list(tool_context.state.get("active_web_urls", []))
+    if not urls:
+        return "目前尚未記錄任何網頁來源。"
+    max_items = max(1, min(limit, 50))
+    lines = ["目前已記錄的網頁來源："]
+    for url in urls[:max_items]:
+        lines.append(f"- {url}")
+    return "\n".join(lines)
 
 
 # -------------------------

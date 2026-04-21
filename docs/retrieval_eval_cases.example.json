@@ -1,0 +1,18 @@
+[
+  {
+    "name": "icd_lookup_page_hit",
+    "question": "what is 6B85",
+    "pdf_path": "ICD 11 Cheater VI精神、行為或神經發育障礙分類Index-20260409.pdf",
+    "expected_pages": [30],
+    "expected_source_contains": ["ICD 11"],
+    "expected_terms": ["6B85"]
+  },
+  {
+    "name": "csv_lookup_row6",
+    "question": "what is 6C41",
+    "file_path": "icd_csv_test_sample.csv",
+    "expected_pages": [6],
+    "expected_source_contains": ["icd_csv_test_sample.csv"],
+    "expected_terms": ["6C41"]
+  }
+]

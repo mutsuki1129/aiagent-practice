@@ -1,0 +1,8 @@
+{
+  "k": 8,
+  "case_count": 2,
+  "valid_count": 2,
+  "recall_at_k": 1.0,
+  "mrr_at_k": 1.0,
+  "results": []
+}

@@ -1,0 +1,10 @@
+[
+  {
+    "name": "ci_csv_lookup_6C41",
+    "question": "what is 6C41",
+    "file_path": "icd_csv_test_sample.csv",
+    "expected_pages": [6],
+    "expected_source_contains": ["icd_csv_test_sample.csv"],
+    "expected_terms": ["6c41"]
+  }
+]

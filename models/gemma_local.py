@@ -8,9 +8,9 @@ from langchain_ollama import ChatOllama
 
 from config import (
     OLLAMA_BASE_URL,
+    OLLAMA_GEMMA_MODEL,
     OLLAMA_HEALTHCHECK_TTL_SECONDS,
     OLLAMA_KEEP_ALIVE,
-    OLLAMA_MODEL,
     OLLAMA_NUM_CTX,
     OLLAMA_NUM_PREDICT,
     OLLAMA_NUM_THREAD,
@@ -18,16 +18,23 @@ from config import (
 )
 
 _OLLAMA_LOCK = threading.Lock()
-_OLLAMA_LLM_INSTANCE: ChatOllama | None = None
+_OLLAMA_LLM_INSTANCES: dict[str, ChatOllama] = {}
 _LAST_HEALTHCHECK_TS = 0.0
+_LAST_MODEL_SET: set[str] = set()
 
 
-def _check_ollama_health(timeout: float = 3.0, force: bool = False) -> None:
+def _check_ollama_health(required_model: str, timeout: float = 3.0, force: bool = False) -> None:
     """Validate Ollama service and model availability before creating the LLM client."""
     global _LAST_HEALTHCHECK_TS
+    global _LAST_MODEL_SET
 
     now = time.time()
-    if not force and _LAST_HEALTHCHECK_TS and (now - _LAST_HEALTHCHECK_TS) < OLLAMA_HEALTHCHECK_TTL_SECONDS:
+    if (
+        not force
+        and _LAST_HEALTHCHECK_TS
+        and (now - _LAST_HEALTHCHECK_TS) < OLLAMA_HEALTHCHECK_TTL_SECONDS
+        and required_model in _LAST_MODEL_SET
+    ):
         return
 
     try:
@@ -44,24 +51,25 @@ def _check_ollama_health(timeout: float = 3.0, force: bool = False) -> None:
         for model in response.json().get("models", [])
         if isinstance(model, dict)
     }
-    if OLLAMA_MODEL not in model_names:
+    if required_model not in model_names:
         raise RuntimeError(
-            f"Ollama 已啟動，但找不到模型 `{OLLAMA_MODEL}`。"
-            f"請先執行：ollama pull {OLLAMA_MODEL}"
+            f"Ollama 已啟動，但找不到模型 `{required_model}`。"
+            f"請先執行：ollama pull {required_model}"
         )
 
     _LAST_HEALTHCHECK_TS = now
+    _LAST_MODEL_SET = model_names
 
 
-def get_gemma_llm(num_predict_override: int | None = None) -> ChatOllama:
-    """Return a configured Gemma ChatOllama instance."""
-    global _OLLAMA_LLM_INSTANCE
+def get_ollama_llm(model_name: str | None = None, num_predict_override: int | None = None) -> ChatOllama:
+    """Return a configured local ChatOllama instance for the requested model."""
+    target_model = (model_name or OLLAMA_GEMMA_MODEL).strip() or OLLAMA_GEMMA_MODEL
 
     if num_predict_override is not None:
-        _check_ollama_health()
+        _check_ollama_health(required_model=target_model)
         return ChatOllama(
             base_url=OLLAMA_BASE_URL,
-            model=OLLAMA_MODEL,
+            model=target_model,
             temperature=OLLAMA_TEMPERATURE,
             num_predict=num_predict_override,
             num_ctx=OLLAMA_NUM_CTX,
@@ -69,23 +77,31 @@ def get_gemma_llm(num_predict_override: int | None = None) -> ChatOllama:
             keep_alive=OLLAMA_KEEP_ALIVE,
         )
 
-    if _OLLAMA_LLM_INSTANCE is not None:
-        _check_ollama_health()
-        return _OLLAMA_LLM_INSTANCE
+    cached = _OLLAMA_LLM_INSTANCES.get(target_model)
+    if cached is not None:
+        _check_ollama_health(required_model=target_model)
+        return cached
 
     with _OLLAMA_LOCK:
-        if _OLLAMA_LLM_INSTANCE is None:
-            _check_ollama_health(force=True)
-            _OLLAMA_LLM_INSTANCE = ChatOllama(
+        cached = _OLLAMA_LLM_INSTANCES.get(target_model)
+        if cached is None:
+            _check_ollama_health(required_model=target_model, force=True)
+            cached = ChatOllama(
                 base_url=OLLAMA_BASE_URL,
-                model=OLLAMA_MODEL,
+                model=target_model,
                 temperature=OLLAMA_TEMPERATURE,
                 num_predict=OLLAMA_NUM_PREDICT,
                 num_ctx=OLLAMA_NUM_CTX,
                 num_thread=OLLAMA_NUM_THREAD,
                 keep_alive=OLLAMA_KEEP_ALIVE,
             )
+            _OLLAMA_LLM_INSTANCES[target_model] = cached
         else:
-            _check_ollama_health()
+            _check_ollama_health(required_model=target_model)
 
-    return _OLLAMA_LLM_INSTANCE
+    return cached
+
+
+def get_gemma_llm(num_predict_override: int | None = None) -> ChatOllama:
+    """Backward-compatible helper for Gemma local model."""
+    return get_ollama_llm(model_name=OLLAMA_GEMMA_MODEL, num_predict_override=num_predict_override)
